@@ -1,0 +1,116 @@
+---
+title: "Model result visualization"
+author: "Bo Zhang"
+date: "March 27, 2017"
+output:
+  word_document: default
+  pdf_document: default
+  html_document: default
+---
+
+```{r,warning=FALSE,include=FALSE}
+SDB <- read.csv("~/Desktop/2017 Spring/Projects/orangutans/SDB.csv")
+data1 <- subset(SDB,select=c(1,2,3,5,6,18,19,20,21))
+colnames(data1) <- c("rate","id","agesex","eid","social","yf","of","fm","ufm")
+data2 <- subset(SDB,select=c(1,2,3,6,17)) 
+require(lme4)
+data1 <- as.data.frame(unclass(data1))
+str(data1)
+head(data1)
+```
+
+```{r,warning=FALSE,message=FALSE}
+#Fit model
+m <- glmer(rate*10 ~ agesex+(agesex*social*(yf+of+fm+ufm))-agesex:of-agesex:social-agesex:yf-agesex:fm-agesex:ufm-yf-of-fm-ufm+(1|id),data = data1,family="poisson")
+summary(m)
+anova(m)
+```
+
+*Visualization(updated)
+```{r}
+library(ggplot2)
+#Create the complete grid to predict all combinations
+predAdolF <- expand.grid(agesex="Adol Female",id=unique(data1[data1$agesex=="Adol Female",]$id), social=c("N", "Y"),yf=c("N", "Y"), of=c("N", "Y"),fm=c("N", "Y"),ufm=c("N","Y"))
+
+predAdulF <- expand.grid(agesex="Adult Female",id=unique(data1[data1$agesex=="Adult Female",]$id), social=c("N", "Y"),yf=c("N", "Y"), of=c("N", "Y"),fm=c("N", "Y"),ufm=c("N","Y"))
+
+predFlang <- expand.grid(agesex="Flanged",id=unique(data1[data1$agesex=="Flanged",]$id), social=c("N", "Y"),yf=c("N", "Y"), of=c("N", "Y"),fm=c("N", "Y"),ufm=c("N","Y"))
+
+predUFlang <- expand.grid(agesex="Unflanged",id=unique(data1[data1$agesex=="Unflanged",]$id), social=c("N", "Y"),yf=c("N", "Y"), of=c("N", "Y"),fm=c("N", "Y"),ufm=c("N","Y"))
+
+pred <- rbind(predAdolF,predAdulF,predFlang,predUFlang)
+
+pred$rate<-predict(m,newdata=pred,type="response")/10
+
+#Young Female more easy to get social stress
+young_female <- ggplot(data=pred,aes(x=agesex,y=rate,fill=agesex))
+young_female+geom_boxplot()
+young_female + geom_violin(trim = FALSE) + 
+  stat_summary(fun.data="mean_sdl",  fun.args = list(mult=1), 
+               geom="pointrange", color = "black")+geom_jitter(alpha=0.05)
+
+#Being social is more stressful
+par(mfrow=c(1,2))
+social <- ggplot(data=pred,aes(x=agesex,y=rate,fill=social,color=agesex))
+social+geom_boxplot(alpha=0.4)
+social+geom_boxplot(aes(fill=pred$agesex))
+
+#Target on Adol Female
+datpredict<- expand.grid(agesex="Adol Female",id=unique(data1[data1$agesex=="Adol Female",]$id), social=c("N", "Y"),yf=c("N", "Y"), of=c("N", "Y"),fm=c("N", "Y"),ufm=c("N","Y"))
+
+predy<-predict(m,newdata=datpredict,type="response")
+
+#Adol Female social with whether play with yf
+a=predy[datpredict$yf=="Y"&datpredict$social=="Y"]
+b=predy[datpredict$yf=="N"&datpredict$social=="Y"]
+boxplot(a,b,col=c("gold"),names=c("Present", "Not Present"))
+
+
+#Adol Female social or not
+c=predy[datpredict$social=="N"]
+d=predy[datpredict$social=="Y"]
+boxplot(c,d,names=c("Not Social", "Social"),col=c("gold"))
+```
+
+
+```{r,warning=FALSE,message=FALSE}
+library(ggplot2)
+#Visualize poisson model
+fitted <- fitted(m)
+data.fitted <- data.frame(data1,fitted/10)
+data.fitted2 <- data.fitted[,-1]
+fitted_mean <-aggregate(fitted.10~.,mean,data=data.fitted2)
+
+#Young Female more easy to get social stress
+young_female <- ggplot(data=fitted_mean,aes(x=agesex,y=fitted.10,fill=agesex))
+young_female+geom_boxplot()
+young_female + geom_violin(trim = FALSE) + 
+  stat_summary(fun.data="mean_sdl",  fun.args = list(mult=1), 
+               geom="pointrange", color = "black")+geom_jitter(alpha=0.1)
+
+#Being social is more stressful
+social <- ggplot(data=fitted_mean,aes(x=social,y=fitted.10))
+social+geom_boxplot(fill="steelblue")
+social+geom_boxplot(aes(fill=fitted_mean$agesex))
+
+social <- ggplot(data=fitted_mean,aes(x=agesex,y=fitted.10,fill=social,color=agesex))
+social+geom_boxplot(alpha=0.4)
+social+geom_boxplot(aes(fill=fitted_mean$agesex))
+
+#Difference of stress level depending on who you are social with,targeting on younf female
+library(reshape)
+social_data <- subset(fitted_mean,social== "Y" & agesex == "Adol Female")
+social_melt <- melt(social_data,id=c("id","agesex","eid","social","fitted.10"))
+social_melt$social_part <- factor(paste0(as.character(social_melt$variable),as.character(social_melt$value)))
+social_partner <- ggplot(social_melt,aes(x=variable,y=fitted.10,fill=value))
+social_partner+geom_boxplot()
+###The result seems that old female and flanged male present will higher the level of stress for young female. 
+
+#Different age and gender affecting young/old female
+young_old <- subset(fitted_mean,social== "Y" & (agesex == "Adol Female"|agesex == "Adult Female"))
+young_old_melt <- melt(young_old,id=c("id","agesex","eid","social","fitted.10"))
+ggplot() +
+facet_wrap(~agesex) +
+geom_boxplot(data=young_old_melt, mapping=aes(x=variable, y=fitted.10, color=value))
+
+```
